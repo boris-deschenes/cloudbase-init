@@ -68,18 +68,48 @@ class NetworkConfigPlugin(base.BasePlugin):
 
         osutils = osutils_factory.OSUtilsFactory().get_os_utils()
 
-        network_adapter_name = CONF.network_adapter
-        if not network_adapter_name:
-            # Get the first available one
-            available_adapters = osutils.get_network_adapters()
-            if not len(available_adapters):
-                raise Exception("No network adapter available")
-            network_adapter_name = available_adapters[0]
+        # Get available network adapters
+        available_adapters = osutils.get_network_adapters()
+        if not len(available_adapters):
+            raise Exception("No network adapter available")
+        first_network_adapter_name = available_adapters[0]
+        second_network_adapter_name = available_adapters[1]
 
-        LOG.info('Configuring network adapter: \'%s\'' % network_adapter_name)
+        LOG.info('Configuring first network adapter: \'%s\'' % first_network_adapter_name)
 
         reboot_required = osutils.set_static_network_config(
-            network_adapter_name, address, netmask, broadcast,
+            first_network_adapter_name, address, netmask, broadcast,
             gateway, dnsnameservers)
+
+        # SECOND NIC
+
+        m = re.search(r'iface eth1 inet static\s+'
+                      r'address\s+(?P<address>[^\s]+)\s+'
+                      r'netmask\s+(?P<netmask>[^\s]+)\s+'
+                      r'broadcast\s+(?P<broadcast>[^\s]+)\s+'
+                      r'up\s+route\s+add\s+-net\s+(?P<r_destination>[^\s]+)\s+netmask\s+(?P<r_netmask>[^\s]+)\s+gw\s+(?P<r_gateway>[^\s]+)',
+                      debian_network_conf)
+        if not m:
+            raise Exception("network_config format not recognized")
+
+        address = m.group('address')
+        netmask = m.group('netmask')
+        broadcast = m.group('broadcast')
+        r_destination = m.group('r_destination')
+        LOG.info('r_destination: \'%s\'' % r_destination)
+        r_netmask = m.group('r_netmask')
+        LOG.info('r_netmask: \'%s\'' % r_netmask)
+        r_gateway = m.group('r_gateway')
+        LOG.info('r_gateway: \'%s\'' % r_gateway)
+
+        LOG.info('Configuring second network adapter: \'%s\'' % second_network_adapter_name)
+
+        reboot_required = osutils.set_static_network_config(
+            second_network_adapter_name, address, netmask, broadcast,
+            r_gateway, None)
+
+        LOG.info('Adding static route')
+
+        osutils.add_static_route(r_destination, r_netmask, r_gateway, 1, 1)
 
         return (base.PLUGIN_EXECUTION_DONE, reboot_required)
